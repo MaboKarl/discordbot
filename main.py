@@ -1,22 +1,49 @@
-import os
-import re
-import random
-import asyncio
-import logging
-import json
-from dotenv import load_dotenv
-
 import discord
 from discord.ext import commands
+import logging
+from dotenv import load_dotenv
+import os
+import asyncio
 import yt_dlp
+import random
+import re
 import aiohttp
+import json
+import requests
+
 
 # -------------------- ENVIRONMENT --------------------
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 AI_API_KEY = os.getenv("AI_API_KEY")  # OpenRouter key
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+
+
+if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
+    print("⚠️ Google API key or CSE ID is missing. Please set them in your .env file.")
+else:
+    print("✅ Google API key and CSE ID loaded successfully!")
+    print("GOOGLE_CSE_ID:", GOOGLE_CSE_ID)
+
+
+
+    #-------------------Force explicit path workaround for the env issue---------------------
+dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(dotenv_path)
+
+print("DEBUG: Current working directory:", os.getcwd())
+print("DEBUG: .env path:", dotenv_path)
+print("DEBUG: GOOGLE_API_KEY =", os.getenv("GOOGLE_API_KEY"))
+print("DEBUG: GOOGLE_CSE_ID =", os.getenv("GOOGLE_CSE_ID"))
+
+
+
 
 # -------------------- LOGGING SETUP --------------------
+
+
+
 if not os.path.exists("discord.log"):
     with open("discord.log", "w", encoding="utf-8"):
         pass
@@ -56,7 +83,7 @@ MEMORY_FILE = "memory.json"
 # Controls
 HISTORY_MESSAGE_LIMIT = 200  # per user per channel keep last N messages (user+assistant entries count separately)
 
-# -------------------- MEMORY HELPERS --------------------
+# -------------------- MEMORY HELPERS FOR OPEN AI RP --------------------
 def save_memory():
     """Save conversation memory to a JSON file."""
     try:
@@ -552,6 +579,53 @@ async def recall_memory(ctx, limit: int = 10):
         snippet = content.replace("\n", " ")[:180]
         formatted.append(f"**{role}:** {snippet}")
     await ctx.send("🧾 Recent memory:\n" + "\n".join(formatted))
+
+
+
+
+# -------------------- IMAGE SEARCH COMMAND --------------------
+
+@bot.command(name="image")
+async def image_search(ctx, *, query: str = None):
+    """Search for an image using Google Custom Search"""
+    if not query:
+        await ctx.send("❓ Please provide something to search! Example: `*image cute cats`")
+        return
+
+    # Check API keys first
+    if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
+        await ctx.send("⚠️ Google API key or CSE ID is missing. Please set them in your `.env` file.")
+        return
+
+    search_url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        "q": query,
+        "cx": str(GOOGLE_CSE_ID),
+        "key": str(GOOGLE_API_KEY),
+        "searchType": "image",
+        "num": 1
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(search_url, params=params) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    await ctx.send(f"⚠️ Google API error {resp.status}: {text[:150]}")
+                    return
+
+                data = await resp.json()
+
+        if "items" in data and data["items"]:
+            image_url = data["items"][0]["link"]
+            await ctx.send(image_url)
+        else:
+            await ctx.send("❌ No image found for that search.")
+    except Exception as e:
+        await ctx.send(f"⚠️ Error searching image: {e}")
+        raise  # keep traceback in your logs
+
+
 
 # -------------------- RUN --------------------
 if __name__ == "__main__":
